@@ -1,14 +1,46 @@
-# Python
+# --- Secrets & local config (placeholders live in .env.example only) ---
+.env
+.env.*
+!.env.example
+
+# --- Python ---
 __pycache__/
 *.py[cod]
 *$py.class
-.env
 .venv/
 env/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+dist/
+build/
+*.egg-info/
 
-# Docker / Database
+# NOTE: uv.lock and .python-version are intentionally TRACKED (reproducibility).
+
+# --- Node ---
+node_modules/
+npm-debug.log*
+
+# --- Data & runtime artifacts ---
 pgdata/
 *.log
+tmp/
 
-# Node
-node_modules/
+# --- VM / IaC artifacts (disks and transcripts never enter git) ---
+vm/logs/
+*.vhdx
+*.vhd
+*.iso
+*.img
+
+# --- Editors / OS ---
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+desktop.ini
