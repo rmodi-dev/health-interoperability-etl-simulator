@@ -1,5 +1,89 @@
-dependencies = [
-    "sqlalchemy>=2.0.0",
-    "alembic>=1.13.0",
-    "psycopg[binary]>=3.1.0"
+[project]
+name = "health-interoperability-etl-simulator"
+dynamic = ["version"]
+description = "Synthetic lab-results interoperability and ETL simulator: HL7 v2 / LIS2-A2 / FHIR R4B to a curated, quality-gated store."
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Robert Modi" }]
+keywords = [
+  "hl7",
+  "fhir",
+  "lis2-a2",
+  "astm",
+  "interoperability",
+  "etl",
+  "data-quality",
+  "iso15189",
 ]
+classifiers = [
+  "Private :: Do Not Upload",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Scientific/Engineering :: Medical Science Apps.",
+]
+
+dependencies = [
+  "fastapi>=0.165.0,<0.166",
+  "uvicorn[standard]>=0.54.0,<0.55",
+  "sqlalchemy>=2.0.58,<2.1",
+  "alembic>=1.20.1,<1.21",
+  "psycopg[binary]>=3.3.9,<3.4",
+  "pydantic>=2.14.4,<3",
+  "pydantic-settings>=2.16.3,<3",
+  "fhir.resources==8.3.0",
+  "hl7apy==1.3.5",
+]
+
+[project.urls]
+Repository = "https://github.com/rmodi-dev/health-interoperability-etl-simulator"
+Issues = "https://github.com/rmodi-dev/health-interoperability-etl-simulator/issues"
+
+[dependency-groups]
+dev = [
+  "pytest>=9.2.0,<10",
+  "pytest-cov>=7.1.0,<8",
+  "httpx>=0.28.1,<0.30",
+  "ruff>=0.17.6,<0.18",
+]
+
+[build-system]
+requires = ["hatchling>=1.33.0,<1.34"]
+build-backend = "hatchling.build"
+
+[tool.hatch.version]
+path = "src/health_interop/__init__.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/health_interop"]
+
+[tool.hatch.build.targets.sdist]
+include = ["src/health_interop", "tests", "README.md", "LICENSE", "pyproject.toml"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "C4", "SIM", "RET"]
+
+[tool.ruff.format]
+quote-style = "double"
+
+[tool.pytest.ini_options]
+minversion = "9.0"
+testpaths = ["tests"]
+addopts = "-ra --strict-markers --strict-config"
+markers = [
+  "integration: requires a running PostgreSQL instance",
+  "slow: noticeably slower than unit tests",
+]
+
+[tool.coverage.run]
+source = ["health_interop"]
+branch = true
+
+[tool.coverage.report]
+show_missing = true
+exclude_also = ["if TYPE_CHECKING:", "raise NotImplementedError"]
