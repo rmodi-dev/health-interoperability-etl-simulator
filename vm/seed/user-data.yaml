@@ -1,0 +1,246 @@
+#cloud-config
+# =============================================================================
+# Platform-only cloud-init for the health-interop lab VM (NoCloud seed, v3).
+# Scope: OS + Docker + Node + uv/Python + Tailscale + encrypted swap + firewall.
+# Project setup (repo, .env, venv, compose) is deliberately NOT here - it lives
+# in the repo Makefile (Stage 1).
+# Tokens __SSH_PUBLIC_KEY__, __TS_AUTHKEY__ and __CONSOLE_PASSWORD_HASH__ are
+# substituted by vm/build-seed.ps1, which fails the build if any token remains.
+# Console break-glass password is ENABLED; SSH remains key-only (ssh_pwauth).
+# After editing this file: rebuild the seed and bump meta-data instance-id.
+# =============================================================================
+hostname: rm-u2604-2611b1
+manage_etc_hosts: true
+timezone: Africa/Kampala
+
+users:
+  - name: rmodi
+    gecos: Robert Modi
+    groups: [sudo]
+    shell: /bin/bash
+    lock_passwd: false
+    hashed_passwd: "__CONSOLE_PASSWORD_HASH__"
+    sudo: ["ALL=(ALL) NOPASSWD:ALL"]
+    ssh_authorized_keys:
+      - "__SSH_PUBLIC_KEY__"
+
+ssh_pwauth: false
+disable_root: true
+
+chpasswd:
+  expire: false
+
+package_update: true
+package_upgrade: true
+package_reboot_if_required: true
+
+packages:
+  - ca-certificates
+  - chrony
+  - cloud-guest-utils
+  - cryptsetup-bin
+  - curl
+  - gnupg
+  - git
+  - jq
+  - unzip
+  - xz-utils
+  - ufw
+  - tmux
+  - htop
+  - make
+  - build-essential
+  - shellcheck
+  - linux-tools-virtual
+  - linux-cloud-tools-virtual
+
+growpart:
+  mode: auto
+  devices: ['/']
+
+write_files:
+  - path: /etc/sysctl.d/99-lab.conf
+    permissions: "0644"
+    content: |
+      # Mixed-workload lab VM: keep the default overcommit heuristic (0).
+      # Memory budgets are enforced per container (compose mem_limit), not by
+      # dedicated-Postgres overcommit accounting.
+      vm.swappiness = 10
+  - path: /etc/docker/daemon.json
+    permissions: "0644"
+    content: |
+      {
+        "log-driver": "json-file",
+        "log-opts": { "max-size": "10m", "max-file": "3" }
+      }
+  - path: /etc/ssh/sshd_config.d/50-lab-hardening.conf
+    permissions: "0644"
+    content: |
+      PasswordAuthentication no
+      KbdInteractiveAuthentication no
+      PermitRootLogin no
+  - path: /etc/tailscale/authkey
+    permissions: "0600"
+    content: "__TS_AUTHKEY__"
+  - path: /usr/local/sbin/lab-bootstrap.sh
+    permissions: "0755"
+    content: |
+      #!/usr/bin/env bash
+      # lab-bootstrap.sh - PLATFORM provisioning only (no project/repo logic).
+      # Delivered via cloud-init write_files; executed once per instance by runcmd.
+      set -Eeuo pipefail
+      on_err() {
+        rc=$?
+        msg="BOOTSTRAP FAILED at line ${1} (exit ${rc})"
+        echo "$msg" >&2
+        if [ -w /dev/console ]; then printf '\n%s\n' "$msg" > /dev/console || true; fi
+      }
+      trap 'on_err $LINENO' ERR
+      export DEBIAN_FRONTEND=noninteractive
+      export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+      printf 'Acquire::Retries "5";\nAcquire::http::Timeout "30";\nAcquire::https::Timeout "30";\n' > /etc/apt/apt.conf.d/80-lab-retries
+
+      NODE_VERSION="24.22.3"
+      NODE_SHA256="4f2b175a6d53a5c617a80dba2676238a0688cef28c6da4eba35c7d844e66fcfb"
+      UV_VERSION="0.13.10"
+      UV_SHA256="bf65ac1a0af10f92c522d91ac096c7c0a39657647b155577e7836c2cbbb4526c"
+      LAB_USER="rmodi"
+      TS_HOSTNAME="rm-u2604-2611b1"
+      SWAP_SIZE_BYTES=4294967296
+
+      log() { printf '\n== %s ==\n' "$*"; }
+
+      log "1/7 Kernel tuning"
+      sysctl --system >/dev/null
+
+      log "2/7 Docker CE (official repo)"
+      if ! command -v docker >/dev/null 2>&1; then
+        install -m 0755 -d /etc/apt/keyrings
+        curl -fsSL --retry 4 --retry-delay 3 --retry-all-errors https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+        chmod 0644 /etc/apt/keyrings/docker.asc
+        . /etc/os-release
+        echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu ${VERSION_CODENAME} stable" \
+          > /etc/apt/sources.list.d/docker.list
+        apt-get update
+        apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+      fi
+      systemctl enable --now docker
+      usermod -aG docker "$LAB_USER"
+
+      log "3/7 Node.js v${NODE_VERSION} (pinned tarball + sha256)"
+      if ! command -v node >/dev/null 2>&1 || [ "$(node --version 2>/dev/null || true)" != "v${NODE_VERSION}" ]; then
+        tmp="$(mktemp -d)"
+        curl -fsSL --retry 4 --retry-delay 3 --retry-all-errors -o "${tmp}/node.tar.xz" "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-x64.tar.xz"
+        echo "${NODE_SHA256}  ${tmp}/node.tar.xz" | sha256sum -c -
+        tar -xJf "${tmp}/node.tar.xz" -C /opt
+        ln -sfn "/opt/node-v${NODE_VERSION}-linux-x64" /opt/node-current
+        for b in node npm npx corepack; do
+          ln -sf "/opt/node-current/bin/${b}" "/usr/local/bin/${b}"
+        done
+        rm -rf "${tmp}"
+      fi
+      node --version
+
+      log "4/7 uv ${UV_VERSION} (pinned release + sha256)"
+      if ! command -v uv >/dev/null 2>&1 || [ "$(uv --version 2>/dev/null | awk '{print $2}')" != "${UV_VERSION}" ]; then
+        tmp="$(mktemp -d)"
+        curl -fsSL --retry 4 --retry-delay 3 --retry-all-errors -o "${tmp}/uv.tar.gz" "https://github.com/astral-sh/uv/releases/download/${UV_VERSION}/uv-x86_64-unknown-linux-gnu.tar.gz"
+        echo "${UV_SHA256}  ${tmp}/uv.tar.gz" | sha256sum -c -
+        tar -xzf "${tmp}/uv.tar.gz" -C "${tmp}"
+        install -m 0755 "${tmp}/uv-x86_64-unknown-linux-gnu/uv" /usr/local/bin/uv
+        install -m 0755 "${tmp}/uv-x86_64-unknown-linux-gnu/uvx" /usr/local/bin/uvx
+        rm -rf "${tmp}"
+      fi
+      uv --version
+      su -l "$LAB_USER" -c 'uv python install 3.12'
+
+      log "5/7 Tailscale (out-of-band access path, independent of LAN)"
+      if ! command -v tailscale >/dev/null 2>&1; then
+        . /etc/os-release
+        dist="${VERSION_CODENAME}"
+        if ! curl -fsSI --retry 2 --retry-delay 2 "https://pkgs.tailscale.com/stable/ubuntu/dists/${dist}/Release" >/dev/null 2>&1; then
+          echo "No Tailscale repo for ${dist}; falling back to noble."
+          dist="noble"
+        fi
+        curl -fsSL --retry 4 --retry-delay 3 --retry-all-errors "https://pkgs.tailscale.com/stable/ubuntu/${dist}.noarmor.gpg" -o /usr/share/keyrings/tailscale-archive-keyring.gpg
+        chmod 0644 /usr/share/keyrings/tailscale-archive-keyring.gpg
+        curl -fsSL --retry 4 --retry-delay 3 --retry-all-errors "https://pkgs.tailscale.com/stable/ubuntu/${dist}.tailscale-keyring.list" -o /etc/apt/sources.list.d/tailscale.list
+        apt-get update
+        apt-get install -y tailscale
+      fi
+      systemctl enable --now tailscaled
+      # Deliberate NON-FATAL step: a spent/expired auth key must never brick the VM.
+      # The platform gate checks tailnet state explicitly, so failure is visible.
+      if [ -s /etc/tailscale/authkey ]; then
+        if tailscale up --hostname="$TS_HOSTNAME" --operator="$LAB_USER" --ssh \
+             --auth-key=file:/etc/tailscale/authkey; then
+          echo "Tailnet join OK: $(tailscale ip -4 | head -n1)"
+        else
+          echo "WARNING: tailnet join failed (expired/reused auth key?). Run manually: sudo tailscale up --ssh --operator=${LAB_USER}" >&2
+        fi
+        rm -f /etc/tailscale/authkey
+      else
+        echo "No auth key supplied; tailnet join skipped. Run: sudo tailscale up --ssh --operator=${LAB_USER}"
+      fi
+      for f in /var/lib/cloud/instance/user-data.txt /var/lib/cloud/instance/user-data.txt.i; do
+        if [ -f "$f" ]; then chmod 0600 "$f"; fi
+      done
+
+      log "6/7 Encrypted swap (discover the 4 GiB data disk by size; never hardcode /dev/sdX)"
+      if ! swapon --show=NAME --noheadings | grep -q 'cswap'; then
+        root_src="$(findmnt -n -o SOURCE /)"
+        root_disk="$(lsblk -no PKNAME "$root_src" | head -n1)"
+        [ -n "$root_disk" ] || root_disk="$(basename "$root_src")"
+        swap_disk=""
+        while read -r name size type; do
+          [ "$type" = "disk" ] || continue
+          if [ "$name" = "$root_disk" ]; then continue; fi
+          if [ "$size" -eq "$SWAP_SIZE_BYTES" ]; then swap_disk="/dev/${name}"; fi
+        done < <(lsblk -bdn -o NAME,SIZE,TYPE)
+        if [ -z "$swap_disk" ]; then
+          echo "ERROR: no ${SWAP_SIZE_BYTES}-byte data disk found; attach the swap VHDX." >&2
+          exit 1
+        fi
+        echo "Using swap disk: ${swap_disk}"
+        wipefs -a "$swap_disk"
+        printf ',,83\n' | sfdisk "$swap_disk"
+        udevadm settle
+        partuuid="$(blkid -s PARTUUID -o value "${swap_disk}1")"
+        grep -q '^cswap ' /etc/crypttab || \
+          echo "cswap /dev/disk/by-partuuid/${partuuid} /dev/urandom plain,swap,cipher=aes-xts-plain64,size=512" >> /etc/crypttab
+        grep -q '^/dev/mapper/cswap ' /etc/fstab || \
+          echo '/dev/mapper/cswap none swap sw 0 0' >> /etc/fstab
+        systemctl daemon-reload
+        systemctl start systemd-cryptsetup@cswap.service
+        swapon /dev/mapper/cswap
+      fi
+      swapon --show
+
+      log "7/7 Firewall (SSH on LAN; everything else via tailnet; app ports will bind 127.0.0.1)"
+      ufw default deny incoming
+      ufw default allow outgoing
+      ufw allow 22/tcp comment 'ssh-lan'
+      ufw allow in on tailscale0 comment 'tailnet'
+      ufw --force enable
+      ufw status verbose
+
+      log "Platform summary"
+      docker --version
+      docker compose version
+      node --version
+      uv --version
+      su -l "$LAB_USER" -c 'uv python list --only-installed'
+      tailscale version | head -n1
+      tailscale ip -4 || echo "tailnet: not joined"
+      df -h /
+      free -h
+      timedatectl | head -n4
+      echo "PLATFORM BOOTSTRAP OK"
+      if [ -w /dev/console ]; then
+        printf '\n%s\n' "PLATFORM BOOTSTRAP OK - ssh rmodi@<ip> or use Tailscale" > /dev/console || true
+      fi
+
+runcmd:
+  - [bash, -c, "set -o pipefail; /usr/local/sbin/lab-bootstrap.sh 2>&1 | tee /var/log/lab-bootstrap.log"]
+
+final_message: "PLATFORM SEED APPLIED - cloud-init finished after $UPTIME seconds"

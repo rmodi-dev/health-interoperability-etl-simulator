@@ -1,0 +1,21 @@
+# All text files: LF in the repo AND on checkout, regardless of core.autocrlf.
+# bash/cloud-init require LF; PowerShell 5.1 parses LF fine (scripts are ASCII-only).
+* text=auto eol=lf
+
+# Windows scripts that genuinely require CRLF
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Binary assets - never normalize
+*.vhdx binary
+*.vhd binary
+*.iso binary
+*.img binary
+*.png binary
+*.jpg binary
+*.gif binary
+*.pdf binary
+*.gz binary
+*.xz binary
+*.zip binary
+*.whl binary
