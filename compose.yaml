@@ -1,0 +1,49 @@
+# =============================================================================
+# Health Data Interoperability & ETL Simulator - Docker Compose (core profile)
+# Compose V2 architecture (docker compose plugin v5.8.0 on the VM).
+# SECURITY: every published port binds to 127.0.0.1 ONLY. Docker-published
+# ports bypass UFW, so loopback binding (not the firewall) is the real control.
+# Remote access is via Tailscale, never via a public bind.
+# =============================================================================
+name: health-interop
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    # Optional hard-pin (verified digest on Docker Hub, 2026-11-21):
+    # image: postgres:17-alpine@sha256:f9cf3e1f0066f0eb0c48707d864f0ac5941e9ff454a072077d97a4d278d07d73
+    container_name: interop-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-interop}
+      POSTGRES_USER: ${POSTGRES_USER:-interop}
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env (run: make env)}"
+      # Store UTC; display local. Keeps HL7/FHIR/SQL timestamps unambiguous.
+      TZ: UTC
+      PGTZ: UTC
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    mem_limit: 512m
+    networks:
+      - interop-net
+
+  # ---- Added in later stages (kept commented so `config` stays valid) ----
+  # api:        # Stage 7 - build: docker/app.Dockerfile, 127.0.0.1:8000:8000
+  # mllp:       # Stage 3 - HL7 v2 listener, 127.0.0.1:2575:2575
+  # node-adapter:  # Stage 4 - LIS2-A2 gateway, 127.0.0.1:3000:3000
+  # hapi:       # Stage 6, profile "full" - FHIR $validate sandbox (~1-1.5 GB JVM)
+
+volumes:
+  pgdata:
+
+networks:
+  interop-net:
+    driver: bridge
