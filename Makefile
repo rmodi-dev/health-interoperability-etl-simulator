@@ -52,7 +52,7 @@ db-logs: ## Tail Postgres logs
 	@docker compose logs -f postgres
 
 db-shell: ## Open psql inside the container
-	@docker compose exec postgres sh -c 'psql -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"'
+	@docker compose exec -T postgres sh -c 'psql -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"'
 
 db-clean: ## Stop and DELETE the data volume (destructive)
 	@docker compose down -v
