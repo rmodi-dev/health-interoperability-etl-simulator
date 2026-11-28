@@ -1,7 +1,20 @@
 {
+  // Portable: point at the venv FOLDER, not a platform-specific executable.
+  // VS Code resolves .venv\Scripts\python.exe (Windows) or .venv/bin/python (Linux).
+  // Applied only on FIRST load for a workspace; afterwards use "Python: Select Interpreter".
+  "python.defaultInterpreterPath": "${workspaceFolder}/.venv",
+
+  // Environment manager for the Python Environments extension. Contains no machine-specific
+  // path, so it is safe to share. Removing it regressed interpreter selection on this setup.
+  // We create/manage the venv with uv, never with VS Code.
+  "python-envs.defaultEnvManager": "ms-python.python:system",
+
+  // src-layout: resolve first-party `health_interop` from source.
   "python.analysis.extraPaths": ["src"],
+
   "python.testing.pytestEnabled": true,
   "python.testing.pytestArgs": ["tests"],
+
   "files.eol": "\n",
   "files.insertFinalNewline": true,
   "files.trimTrailingWhitespace": true,
