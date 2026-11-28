@@ -6,7 +6,7 @@
 SHELL := /bin/bash
 
 # ---------------------------------------------------------------------------
-.PHONY: help bootstrap env test test-unit test-integration lint format check db-up db-down db-logs db-shell db-clean
+.PHONY: help bootstrap env test test-unit test-integration lint format check db-up db-down db-logs db-shell db-clean db-migrate db-migrate-check db-history
 
 help: ## Show available targets
 	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z_-]+:.*?## / {printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -62,3 +62,12 @@ db-shell: ## Open psql inside the container
 
 db-clean: ## Stop and DELETE the data volume (destructive)
 	@docker compose down -v
+
+db-migrate: ## Apply Alembic migrations to the real interop database
+	@uv run alembic upgrade head
+
+db-migrate-check: ## Fail if models and the migrated database disagree
+	@uv run alembic check
+
+db-history: ## Show migration history
+	@uv run alembic history --verbose

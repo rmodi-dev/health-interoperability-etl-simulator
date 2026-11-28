@@ -1,23 +1,25 @@
 """Shared pytest fixtures.
 
-Integration tests (marked `integration`) need a reachable PostgreSQL. When it is
-absent - a Windows dev box, or CI without the service container - they SKIP with
-an explicit reason rather than erroring.
+Schema source of truth: Alembic migrations (NOT create_all). The session fixture
+creates a dedicated `interop_test` database, applies `alembic upgrade head`, and
+drops the database on teardown. The real `interop` database is never touched.
 
-Isolation: tests run against a dedicated `interop_test` database, created and
-dropped by the session fixture. The real `interop` database is never touched.
-Each test runs inside a connection-level transaction that is rolled back.
+Integration tests (marked `integration`) SKIP with an explicit reason when
+PostgreSQL is unreachable, so Windows and DB-less environments stay green.
 """
 
 from collections.abc import Iterator
+from pathlib import Path
 
 import pytest
+from alembic import command
+from alembic.config import Config
 from sqlalchemy import Engine, create_engine, text
 from sqlalchemy.orm import Session
 
 from health_interop.config import Settings
-from health_interop.db.base import SCHEMAS, Base
 
+REPO_ROOT = Path(__file__).resolve().parents[1]
 TEST_DB_NAME = "interop_test"  # constant identifier, never user input
 
 
@@ -44,17 +46,16 @@ def pg_engine() -> Iterator[Engine]:
         admin.dispose()
         pytest.skip(f"PostgreSQL not reachable: {exc}")
 
-    engine = create_engine(settings.database_url.set(database=TEST_DB_NAME), pool_pre_ping=True)
+    test_url = settings.database_url.set(database=TEST_DB_NAME)
+    cfg = Config(str(REPO_ROOT / "alembic.ini"))
+    cfg.set_main_option("sqlalchemy.url", test_url.render_as_string(hide_password=False))
     try:
-        with engine.begin() as conn:
-            for schema in SCHEMAS:
-                conn.execute(text(f'create schema if not exists "{schema}"'))
-        Base.metadata.create_all(engine)
+        command.upgrade(cfg, "head")
     except Exception as exc:  # noqa: BLE001
-        engine.dispose()
         admin.dispose()
-        pytest.skip(f"Could not prepare test schema: {exc}")
+        pytest.skip(f"Alembic upgrade failed: {exc}")
 
+    engine = create_engine(test_url, pool_pre_ping=True)
     try:
         yield engine
     finally:
@@ -62,6 +63,13 @@ def pg_engine() -> Iterator[Engine]:
         with admin.connect() as conn:
             conn.execute(text(f'drop database if exists "{TEST_DB_NAME}" with (force)'))
         admin.dispose()
+
+
+@pytest.fixture(scope="session")
+def alembic_config(pg_engine: Engine) -> Config:
+    cfg = Config(str(REPO_ROOT / "alembic.ini"))
+    cfg.set_main_option("sqlalchemy.url", pg_engine.url.render_as_string(hide_password=False))
+    return cfg
 
 
 @pytest.fixture
