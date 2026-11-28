@@ -208,12 +208,16 @@ def test_database_rejects_out_of_vocabulary_enum(db_session: Session) -> None:
 
     Raw SQL is used deliberately - SQLAlchemy's Enum would raise LookupError in
     Python before the value ever reached the database, hiding the DB-level guard.
+    The invalid value is intentionally shorter than the longest valid enum value
+    (parse_failed = 12 chars) so it passes the VARCHAR type check and is caught
+    by the CHECK constraint -> IntegrityError, which is the proof the constraint
+    is active.
     """
     message = _land(db_session, "CTRL-7")
     with pytest.raises(IntegrityError), db_session.begin_nested():
         db_session.execute(
             text("update raw.ingest_message set ingest_status = :bad where id = :id"),
-            {"bad": "not-a-real-status", "id": message.id},
+            {"bad": "bad", "id": message.id},
         )
 
 
