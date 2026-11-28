@@ -40,7 +40,8 @@ vm/logs/
 
 # --- Editors / OS ---
 .idea/
-.vscode/
+.vscode/*
+!.vscode/settings.json
 .DS_Store
 Thumbs.db
 desktop.ini

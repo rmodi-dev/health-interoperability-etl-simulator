@@ -1,11 +1,24 @@
 """Foundation smoke tests: prove the dependency set works on Python 3.12.
 
 Every clinical value in this file is SYNTHETIC.
+
+Two typing decisions, both deliberate:
+* FHIR resources are built from typed model classes (Coding / CodeableConcept /
+  Quantity) rather than raw dicts: fhir.resources >= 8.2.0 adds TYPE_CHECKING
+  type aliases, so dict literals fail static typing even though pydantic
+  accepts them at runtime.
+* Quantity.value is a FHIR decimal -> decimal.Decimal. Lab values are carried
+  as Decimal, never float, to avoid binary rounding of clinical results.
 """
 
+from decimal import Decimal
+
 import sqlalchemy
+from fhir.resources.R4B.codeableconcept import CodeableConcept
+from fhir.resources.R4B.coding import Coding
 from fhir.resources.R4B.observation import Observation
 from fhir.resources.R4B.patient import Patient
+from fhir.resources.R4B.quantity import Quantity
 from hl7apy.consts import VALIDATION_LEVEL
 from hl7apy.parser import parse_message
 
@@ -31,29 +44,38 @@ def test_fhir_r4b_models_construct_and_serialize() -> None:
     patient = Patient(id="synth-patient-1", gender="unknown")
     observation = Observation(
         status="final",
-        code={
-            "coding": [
-                {
-                    "system": "http://loinc.org",
-                    "code": "718-7",
-                    "display": "Hemoglobin",
-                }
+        code=CodeableConcept(
+            coding=[
+                Coding(
+                    system="http://loinc.org",
+                    code="718-7",
+                    display="Hemoglobin",
+                )
             ]
-        },
-        valueQuantity={
-            "value": 13.5,
-            "unit": "g/dL",
-            "system": "http://unitsofmeasure.org",
-            "code": "g/dL",
-        },
+        ),
+        valueQuantity=Quantity(
+            value=Decimal("13.5"),
+            unit="g/dL",
+            system="http://unitsofmeasure.org",
+            code="g/dL",
+        ),
     )
     assert patient.get_resource_type() == "Patient"
     assert observation.get_resource_type() == "Observation"
-    payload = observation.model_dump(exclude_none=True)
+    assert observation.valueQuantity is not None
+    assert observation.valueQuantity.value == Decimal("13.5")
+
+    # mode="json" yields JSON-compatible primitives (FHIR wire shape).
+    payload = observation.model_dump(mode="json", exclude_none=True)
     assert payload["resourceType"] == "Observation"
-    assert payload["valueQuantity"]["value"] == 13.5
+    assert payload["code"]["coding"][0]["code"] == "718-7"
 
 
 def test_hl7apy_parses_synthetic_oru_r01() -> None:
     message = parse_message(SYNTHETIC_ORU_R01, validation_level=VALIDATION_LEVEL.TOLERANT)
-    assert message.msh.msh_9.to_er7() == "ORU^R01"
+    msh_9 = message.msh.msh_9
+    # hl7apy's dynamic child lookup is typed ElementProxy | None (its
+    # _default_child_lookup can fall through). MSH-9 is mandatory in a parsed
+    # message, so assert the invariant: narrows the type AND guards runtime.
+    assert msh_9 is not None
+    assert msh_9.to_er7() == "ORU^R01"
