@@ -6,7 +6,7 @@
 SHELL := /bin/bash
 
 # ---------------------------------------------------------------------------
-.PHONY: help bootstrap env test lint format check db-up db-down db-logs db-shell db-clean
+.PHONY: help bootstrap env test test-unit test-integration lint format check db-up db-down db-logs db-shell db-clean
 
 help: ## Show available targets
 	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z_-]+:.*?## / {printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -26,6 +26,12 @@ env: ## Generate .env from template with real random secrets (once)
 
 test: ## Run the test suite
 	@uv run pytest -q
+
+test-unit: ## Run only unit tests (no database required)
+	@uv run pytest -q -m "not integration"
+
+test-integration: ## Run only integration tests (requires make db-up)
+	@uv run pytest -q -m integration
 
 lint: ## Lint only (no autofix)
 	@uv run ruff check .

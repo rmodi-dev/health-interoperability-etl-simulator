@@ -6,9 +6,14 @@ on:
   pull_request:
     branches: [main]
 
+# Least privilege: this workflow only needs to read the repository.
+permissions:
+  contents: read
+
 jobs:
   lint-and-test:
     runs-on: ubuntu-latest
+
     steps:
       - uses: actions/checkout@v7
 
@@ -27,5 +32,43 @@ jobs:
       - name: Lint
         run: uv run ruff check .
 
+      - name: Format check
+        run: uv run ruff format --check .
+
+      # Postgres is started as a STEP, not a `services:` container, because a
+      # value generated at runtime cannot be injected into a service (GITHUB_ENV
+      # only reaches later steps). This lets us use a random, single-run password:
+      # nothing hardcoded in the repo, nothing stored as a repository secret, and
+      # it still works on fork pull requests (where secrets are withheld).
+      - name: Start PostgreSQL (ephemeral, random credential)
+        run: |
+          set -euo pipefail
+          PG_PASSWORD="$(openssl rand -hex 24)"
+          echo "::add-mask::${PG_PASSWORD}"
+          echo "POSTGRES_PASSWORD=${PG_PASSWORD}" >> "$GITHUB_ENV"
+          docker run -d --name ci-postgres \
+            -e POSTGRES_DB=interop \
+            -e POSTGRES_USER=interop \
+            -e POSTGRES_PASSWORD="${PG_PASSWORD}" \
+            -e TZ=UTC \
+            -p 127.0.0.1:5432:5432 \
+            postgres:17-alpine
+          for i in $(seq 1 30); do
+            if docker exec ci-postgres pg_isready -U interop -d interop >/dev/null 2>&1; then
+              echo "postgres ready after ${i} attempt(s)"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "postgres did not become ready" >&2
+          docker logs ci-postgres >&2
+          exit 1
+
       - name: Test
+        env:
+          POSTGRES_HOST: 127.0.0.1
+          POSTGRES_PORT: "5432"
+          POSTGRES_DB: interop
+          POSTGRES_USER: interop
+          # POSTGRES_PASSWORD arrives via GITHUB_ENV from the previous step.
         run: uv run pytest -q
