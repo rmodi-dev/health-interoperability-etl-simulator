@@ -5,10 +5,13 @@ All data handled by this project is SYNTHETIC. No real patient data.
 Design notes:
 * Result values use Numeric(18, 6) -> decimal.Decimal. Never float: FHIR decimal
   is base-10 arbitrary precision, and binary rounding of a lab result is a defect.
-* Enumerations are VARCHAR + CHECK (native_enum=False, create_constraint=True)
-  so vocabularies evolve without ALTER TYPE migrations, while the database still
-  rejects out-of-vocabulary values. NOTE: create_constraint defaults to False
-  since SQLAlchemy 1.4 - it must be set explicitly.
+* Enumerations are VARCHAR + CHECK (native_enum=False, create_constraint=True) so
+  vocabularies evolve without ALTER TYPE migrations, while PostgreSQL still
+  rejects out-of-vocabulary values. create_constraint must be set explicitly:
+  it defaults to False since SQLAlchemy 1.4.
+* Table comments are intentionally NOT used: op.create_table(comment=) proved
+  unreliable across Alembic releases and caused autogenerate drift. Table purpose
+  is documented in each class docstring instead.
 * No ORM relationship() definitions: pipeline code uses explicit joins to avoid
   lazy-load N+1 queries and implicit I/O.
 * raw.payload is TEXT; PostgreSQL cannot store 0x00, so transport layers must
@@ -65,15 +68,18 @@ class IngestMessage(Base):
         CheckConstraint("byte_length >= 0", name="byte_length_non_negative"),
         CheckConstraint("length(payload_sha256) = 64", name="payload_sha256_length"),
         Index("ix_ingest_message_payload_sha256", "payload_sha256"),
-        {
-            "schema": "raw",
-            "comment": "Immutable inbound message landing zone (synthetic data only).",
-        },
+        {"schema": "raw"},
     )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     channel: Mapped[str] = mapped_column(
-        Enum(*CHANNELS, name="ingest_channel", native_enum=False), nullable=False
+        Enum(
+            *CHANNELS,
+            name="ingest_channel",
+            native_enum=False,
+            create_constraint=True,
+        ),
+        nullable=False,
     )
     source_system: Mapped[str] = mapped_column(String(64), nullable=False)
     external_control_id: Mapped[str] = mapped_column(String(128), nullable=False)
@@ -82,21 +88,17 @@ class IngestMessage(Base):
     byte_length: Mapped[int] = mapped_column(Integer, nullable=False)
     transport_meta: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
     ingest_status: Mapped[str] = mapped_column(
-        Enum(*INGEST_STATUSES, name="ingest_status", native_enum=False),
+        Enum(
+            *INGEST_STATUSES,
+            name="ingest_status",
+            native_enum=False,
+            create_constraint=True,
+        ),
         nullable=False,
         default="landed",
     )
     received_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
-    )
-    channel: Mapped[str] = mapped_column(
-        Enum(*CHANNELS, name="ingest_channel", native_enum=False, create_constraint=True),
-        nullable=False,
-    )
-    ingest_status: Mapped[str] = mapped_column(
-        Enum(*INGEST_STATUSES, name="ingest_status", native_enum=False, create_constraint=True),
-        nullable=False,
-        default="landed",
     )
 
 
@@ -107,7 +109,7 @@ class StagedLabResult(Base):
     __table_args__ = (
         UniqueConstraint("raw_message_id", "source_locator", name="uq_stg_lab_result_locator"),
         Index("ix_stg_lab_result_patient_identifier", "patient_identifier"),
-        {"schema": "stg", "comment": "Parsed observations awaiting data-quality gating."},
+        {"schema": "stg"},
     )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
@@ -143,17 +145,17 @@ class StagedLabResult(Base):
     issued_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     dqa_disposition: Mapped[str] = mapped_column(
-        Enum(*DQA_DISPOSITIONS, name="dqa_disposition", native_enum=False),
+        Enum(
+            *DQA_DISPOSITIONS,
+            name="dqa_disposition",
+            native_enum=False,
+            create_constraint=True,
+        ),
         nullable=False,
         default="pending",
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
-    )
-    dqa_disposition: Mapped[str] = mapped_column(
-        Enum(*DQA_DISPOSITIONS, name="dqa_disposition", native_enum=False, create_constraint=True),
-        nullable=False,
-        default="pending",
     )
 
 
@@ -163,7 +165,7 @@ class Patient(Base):
     __tablename__ = "patient"
     __table_args__ = (
         UniqueConstraint("identifier_system", "identifier_value", name="uq_patient_identifier"),
-        {"schema": "core", "comment": "Curated synthetic patient identities."},
+        {"schema": "core"},
     )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
@@ -184,7 +186,7 @@ class LabOrder(Base):
     __tablename__ = "lab_order"
     __table_args__ = (
         UniqueConstraint("filler_order_id", "source_system", name="uq_lab_order_filler"),
-        {"schema": "core", "comment": "Curated laboratory orders."},
+        {"schema": "core"},
     )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
@@ -208,7 +210,7 @@ class Specimen(Base):
     __tablename__ = "specimen"
     __table_args__ = (
         UniqueConstraint("lab_order_id", "specimen_identifier", name="uq_specimen_per_order"),
-        {"schema": "core", "comment": "Curated specimens linked to orders."},
+        {"schema": "core"},
     )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
@@ -239,7 +241,7 @@ class LabResult(Base):
             "value_numeric IS NOT NULL OR value_text IS NOT NULL", name="value_present"
         ),
         Index("ix_core_lab_result_patient_observed", "patient_id", "observed_at"),
-        {"schema": "core", "comment": "Quality-gated results; ML-ready curated layer."},
+        {"schema": "core"},
     )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
@@ -283,7 +285,7 @@ class DqaFinding(Base):
     __table_args__ = (
         Index("ix_dq_finding_staged_result_id", "staged_result_id"),
         Index("ix_dq_finding_rule_code", "rule_code"),
-        {"schema": "dq", "comment": "ISO 15189-informed rule findings and quarantine reasons."},
+        {"schema": "dq"},
     )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
@@ -297,17 +299,14 @@ class DqaFinding(Base):
     rule_title: Mapped[str] = mapped_column(String(128), nullable=False)
     dama_dimension: Mapped[str] = mapped_column(String(32), nullable=False)
     severity: Mapped[str] = mapped_column(
-        Enum(*SEVERITIES, name="dq_severity", native_enum=False), nullable=False
+        Enum(*SEVERITIES, name="dq_severity", native_enum=False, create_constraint=True),
+        nullable=False,
     )
     field_name: Mapped[str | None] = mapped_column(String(64))
     observed_value: Mapped[str | None] = mapped_column(String(256))
     detail: Mapped[str] = mapped_column(String(512), nullable=False)
     detected_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
-    )
-    severity: Mapped[str] = mapped_column(
-        Enum(*SEVERITIES, name="dq_severity", native_enum=False, create_constraint=True),
-        nullable=False,
     )
 
 
@@ -324,7 +323,7 @@ class FhirResource(Base):
             "resource_type", "logical_id", "version_id", name="uq_fhir_resource_version"
         ),
         Index("ix_fhir_resource_core_lab_result_id", "core_lab_result_id"),
-        {"schema": "fhir", "comment": "Projected FHIR R4B resources (AU Core-inspired subset)."},
+        {"schema": "fhir"},
     )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)

@@ -10,6 +10,7 @@ from __future__ import annotations
 import sqlalchemy as sa
 from alembic import op
 from sqlalchemy.dialects import postgresql
+from sqlalchemy.schema import CreateSchema, DropSchema
 
 revision = "0001"
 down_revision = None
@@ -21,7 +22,7 @@ SCHEMAS = ("raw", "stg", "core", "dq", "fhir")
 
 def upgrade() -> None:
     for name in SCHEMAS:
-        op.execute(sa.schema.CreateSchema(name))
+        op.execute(CreateSchema(name))
 
     # --- raw ---------------------------------------------------------------
     op.create_table(
@@ -73,7 +74,6 @@ def upgrade() -> None:
             name="uq_ingest_message_natural_key",
         ),
         schema="raw",
-        comment="Immutable landing records",
     )
     op.create_index(
         "ix_ingest_message_payload_sha256",
@@ -141,7 +141,6 @@ def upgrade() -> None:
             name="uq_stg_lab_result_locator",
         ),
         schema="stg",
-        comment="Parsed observations awaiting quality gating",
     )
     op.create_index(
         "ix_stg_lab_result_patient_identifier",
@@ -174,7 +173,6 @@ def upgrade() -> None:
             name="uq_patient_identifier",
         ),
         schema="core",
-        comment="Curated patient demographics",
     )
 
     op.create_table(
@@ -206,7 +204,6 @@ def upgrade() -> None:
             name="uq_lab_order_filler",
         ),
         schema="core",
-        comment="Curated lab orders",
     )
 
     op.create_table(
@@ -237,7 +234,6 @@ def upgrade() -> None:
             name="uq_specimen_per_order",
         ),
         schema="core",
-        comment="Curated specimens",
     )
 
     op.create_table(
@@ -297,7 +293,6 @@ def upgrade() -> None:
         sa.PrimaryKeyConstraint("id", name="pk_lab_result"),
         sa.UniqueConstraint("staged_result_id", name="uq_core_lab_result_staged"),
         schema="core",
-        comment="Quality-gated lab results",
     )
     op.create_index(
         "ix_core_lab_result_patient_observed",
@@ -351,7 +346,6 @@ def upgrade() -> None:
         ),
         sa.PrimaryKeyConstraint("id", name="pk_finding"),
         schema="dq",
-        comment="Data quality findings and quarantine reasons",
     )
     op.create_index(
         "ix_dq_finding_staged_result_id",
@@ -399,7 +393,6 @@ def upgrade() -> None:
             name="uq_fhir_resource_version",
         ),
         schema="fhir",
-        comment="Projected FHIR R4B resources",
     )
     op.create_index(
         "ix_fhir_resource_core_lab_result_id",
@@ -423,4 +416,4 @@ def downgrade() -> None:
     ):
         op.drop_table(table, schema=schema)
     for name in reversed(SCHEMAS):
-        op.execute(sa.schema.DropSchema(name, cascade=True))
+        op.execute(DropSchema(name, cascade=True))
