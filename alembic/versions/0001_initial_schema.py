@@ -67,7 +67,10 @@ def upgrade() -> None:
         sa.CheckConstraint("length(payload_sha256) = 64", name="payload_sha256_length"),
         sa.PrimaryKeyConstraint("id", name="pk_ingest_message"),
         sa.UniqueConstraint(
-            "channel", "source_system", "external_control_id", name="uq_ingest_message_natural_key"
+            "channel",
+            "source_system",
+            "external_control_id",
+            name="uq_ingest_message_natural_key",
         ),
         schema="raw",
         comment="Immutable landing records",
@@ -132,7 +135,11 @@ def upgrade() -> None:
             ondelete="CASCADE",
         ),
         sa.PrimaryKeyConstraint("id", name="pk_lab_result"),
-        sa.UniqueConstraint("raw_message_id", "source_locator", name="uq_stg_lab_result_locator"),
+        sa.UniqueConstraint(
+            "raw_message_id",
+            "source_locator",
+            name="uq_stg_lab_result_locator",
+        ),
         schema="stg",
         comment="Parsed observations awaiting quality gating",
     )
@@ -161,7 +168,11 @@ def upgrade() -> None:
             nullable=False,
         ),
         sa.PrimaryKeyConstraint("id", name="pk_patient"),
-        sa.UniqueConstraint("identifier_system", "identifier_value", name="uq_patient_identifier"),
+        sa.UniqueConstraint(
+            "identifier_system",
+            "identifier_value",
+            name="uq_patient_identifier",
+        ),
         schema="core",
         comment="Curated patient demographics",
     )
@@ -189,7 +200,11 @@ def upgrade() -> None:
             ondelete="RESTRICT",
         ),
         sa.PrimaryKeyConstraint("id", name="pk_lab_order"),
-        sa.UniqueConstraint("filler_order_id", "source_system", name="uq_lab_order_filler"),
+        sa.UniqueConstraint(
+            "filler_order_id",
+            "source_system",
+            name="uq_lab_order_filler",
+        ),
         schema="core",
         comment="Curated lab orders",
     )
@@ -216,7 +231,11 @@ def upgrade() -> None:
             ondelete="CASCADE",
         ),
         sa.PrimaryKeyConstraint("id", name="pk_specimen"),
-        sa.UniqueConstraint("lab_order_id", "specimen_identifier", name="uq_specimen_per_order"),
+        sa.UniqueConstraint(
+            "lab_order_id",
+            "specimen_identifier",
+            name="uq_specimen_per_order",
+        ),
         schema="core",
         comment="Curated specimens",
     )
@@ -248,7 +267,8 @@ def upgrade() -> None:
             nullable=False,
         ),
         sa.CheckConstraint(
-            "value_numeric IS NOT NULL OR value_text IS NOT NULL", name="value_present"
+            "value_numeric IS NOT NULL OR value_text IS NOT NULL",
+            name="value_present",
         ),
         sa.ForeignKeyConstraint(
             ["staged_result_id"],
@@ -334,9 +354,19 @@ def upgrade() -> None:
         comment="Data quality findings and quarantine reasons",
     )
     op.create_index(
-        "ix_dq_finding_staged_result_id", "finding", ["staged_result_id"], unique=False, schema="dq"
+        "ix_dq_finding_staged_result_id",
+        "finding",
+        ["staged_result_id"],
+        unique=False,
+        schema="dq",
     )
-    op.create_index("ix_dq_finding_rule_code", "finding", ["rule_code"], unique=False, schema="dq")
+    op.create_index(
+        "ix_dq_finding_rule_code",
+        "finding",
+        ["rule_code"],
+        unique=False,
+        schema="dq",
+    )
 
     # --- fhir --------------------------------------------------------------
     op.create_table(
@@ -363,7 +393,10 @@ def upgrade() -> None:
         ),
         sa.PrimaryKeyConstraint("id", name="pk_resource"),
         sa.UniqueConstraint(
-            "resource_type", "logical_id", "version_id", name="uq_fhir_resource_version"
+            "resource_type",
+            "logical_id",
+            "version_id",
+            name="uq_fhir_resource_version",
         ),
         schema="fhir",
         comment="Projected FHIR R4B resources",
